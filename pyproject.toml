@@ -1,0 +1,30 @@
+[tool.poetry]
+name = "twofabackup"
+version = "1.0.0"
+description = "Application to safely and locally store backup codes for two factor authenticated services"
+authors = ["Marnix Enthoven <26323484+narbux@users.noreply.github.com>"]
+readme = "README.md"
+repository = "https://github.com/narbux/twofabackup"
+license = "GPL-3.0-or-later"
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: System :: Archiving :: Backup",
+    "Topic :: Utilities",
+]
+
+[tool.poetry.scripts]
+twofabackup = 'twofabackup.main:main'
+
+[tool.poetry.dependencies]
+python = "^3.11"
+cryptography = "^41.0.7"
+pydantic = "^2.5.3"
+rich = "^13.7.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
