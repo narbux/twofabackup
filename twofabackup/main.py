@@ -17,12 +17,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>."""
 
 import argparse
 import sqlite3
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 from cryptography.fernet import Fernet, InvalidToken
-from pydantic import BaseModel
 from rich.console import Console, ConsoleOptions, RenderResult
 from rich.panel import Panel
 from rich.prompt import Prompt
@@ -35,16 +35,14 @@ console = Console(color_system="truecolor")
 error_console = Console(stderr=True, style="bold red")
 
 
-class ServiceCodesBase(BaseModel):
+@dataclass
+class ServiceCodes:
+    id: int
     service_name: str
+    date_added: str
     description: Optional[str]
     encrypted_backup_codes: Optional[bytes] = None
     decrypted_backup_codes: Optional[str] = ""
-
-
-class ServiceCodes(ServiceCodesBase):
-    id: int
-    date_added: datetime
 
     def __rich_console__(
         self, console: Console, options: ConsoleOptions
@@ -52,7 +50,7 @@ class ServiceCodes(ServiceCodesBase):
         panel = Panel(
             str(self.decrypted_backup_codes),
             title=self.service_name,
-            subtitle=f"Added on: {self.date_added.strftime('%d/%m/%Y')}",
+            subtitle=f"Added on: {datetime.fromisoformat(self.date_added).strftime('%d/%m/%Y')}",
         )
         yield panel
 
@@ -117,7 +115,11 @@ def encrypt_codes(clear_codes: str, fernet: Fernet) -> bytes:
 def input_in_db(args: argparse.Namespace) -> None:
     key = get_key()
     input_sql = """\
-        INSERT INTO servicecodes (service_name, description, encrypted_backup_codes, date_added) 
+        INSERT INTO servicecodes (
+            service_name, 
+            description, 
+            encrypted_backup_codes, 
+            date_added ) 
         VALUES (?,?,?,?)
     """
     input = Path(args.file.name).read_text().strip()
@@ -154,7 +156,9 @@ def decrypt_all(args: argparse.Namespace) -> None:
         res: list[ServiceCodes] = cur.execute(select_all_sql).fetchall()
     for x in res:
         if not x.encrypted_backup_codes:
-            raise ValueError
+            raise ValueError(
+                "Something went wrong in retrieving encrypted data from database"
+            )
         x.decrypted_backup_codes = decrypt_item(x.encrypted_backup_codes, key)
         console.print(x)
         console.print("")
