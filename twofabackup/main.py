@@ -20,7 +20,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Self
 
 from cryptography.fernet import Fernet, InvalidToken
 from rich.console import Console, ConsoleOptions, RenderResult
@@ -47,17 +47,63 @@ class ServiceCodes:
     def __rich_console__(
         self, console: Console, options: ConsoleOptions
     ) -> RenderResult:
+        today = datetime.fromisoformat(self.date_added)
+        contents = ""
+        if self.description:
+            contents += f"[bold]{self.description}[/]\n\n"
+        contents += str(self.decrypted_backup_codes)
         panel = Panel(
-            str(self.decrypted_backup_codes),
+            contents,
             title=self.service_name,
-            subtitle=f"Added on: {datetime.fromisoformat(self.date_added).strftime('%d/%m/%Y')}",
+            subtitle=f"Added on: {today.strftime('%d/%m/%Y')}",
         )
         yield panel
 
     @classmethod
-    def servicecodes_factory(cls, cursor, row):
+    def servicecodes_factory(cls, cursor, row) -> Self:
         fields = [column[0] for column in cursor.description]
         return cls(**{k: v for k, v in zip(fields, row)})
+
+
+class KeyHolder:
+    def __init__(self):
+        self.engine = self.fernet_factory()
+
+    def fernet_factory(self) -> Fernet:
+        if count_entries_db() == 0:
+            key = self.generate_new_key()
+            console.print(
+                f"Your key is [blue bold] {key.decode()} [/] \nSave this code carefully!"
+            )
+        else:
+            key = self.ask_key_from_user()
+
+        try:
+            fernet = Fernet(key)
+        except ValueError:
+            error_console.print("Invalid key! #001")
+            raise SystemExit(1)
+        return fernet
+
+    @staticmethod
+    def generate_new_key() -> bytes:
+        return Fernet.generate_key()
+
+    @staticmethod
+    def ask_key_from_user() -> bytes:
+        key = Prompt.ask("Provide your encryption key", password=True)
+        return key.encode()
+
+    def encrypt_codes(self, clear_codes: str) -> bytes:
+        return self.engine.encrypt(clear_codes.encode())
+
+    def decrypt_item(self, data: bytes) -> str:
+        try:
+            decrypted_data = self.engine.decrypt(data).decode()
+        except InvalidToken:
+            error_console.print("Invalid key! #002")
+            raise SystemExit(1)
+        return decrypted_data
 
 
 def create_db() -> None:
@@ -83,37 +129,7 @@ def count_entries_db() -> int:
     return count[0]
 
 
-def generate_new_key() -> bytes:
-    return Fernet.generate_key()
-
-
-def ask_key_from_user() -> bytes:
-    key = Prompt.ask("Provide your encryption key", password=True)
-    return key.encode()
-
-
-def get_key() -> Fernet:
-    if count_entries_db() == 0:
-        key = generate_new_key()
-        console.print(
-            f"Your key is [blue bold] {key.decode()} [/] \nSave this code carefully!"
-        )
-    else:
-        key = ask_key_from_user()
-    try:
-        fernet = Fernet(key)
-    except ValueError:
-        error_console.print("Invalid key! #001")
-        raise SystemExit(1)
-    return fernet
-
-
-def encrypt_codes(clear_codes: str, fernet: Fernet) -> bytes:
-    return fernet.encrypt(clear_codes.encode())
-
-
 def input_in_db(args: argparse.Namespace) -> None:
-    key = get_key()
     input_sql = """\
         INSERT INTO servicecodes (
             service_name, 
@@ -122,8 +138,9 @@ def input_in_db(args: argparse.Namespace) -> None:
             date_added ) 
         VALUES (?,?,?,?)
     """
+    key = KeyHolder()
     input = Path(args.file.name).read_text().strip()
-    encrypted_codes = encrypt_codes(input, key)
+    encrypted_codes = key.encrypt_codes(input)
     timestamp = datetime.now()
     with sqlite3.connect(DB_URI) as db:
         db.execute(
@@ -133,17 +150,12 @@ def input_in_db(args: argparse.Namespace) -> None:
     console.print(f"[green bold]\t>> Added {args.name} to database")
 
 
-def decrypt_item(data: bytes, fernet: Fernet) -> str:
-    try:
-        decrypted_data = fernet.decrypt(data).decode()
-    except InvalidToken:
-        error_console.print("Invalid key! #002")
-        raise SystemExit(1)
-    return decrypted_data
-
-
 def decrypt_all(args: argparse.Namespace) -> None:
-    key = get_key()
+    if count_entries_db() < 1:
+        error_console.print("Add new entries to db first.")
+        error_console.print("See `twofabackup add -h` for details")
+        raise SystemExit(1)
+    key = KeyHolder()
     select_all_sql = """\
         SELECT 
             id, service_name, description, encrypted_backup_codes, date_added
@@ -153,15 +165,14 @@ def decrypt_all(args: argparse.Namespace) -> None:
     with sqlite3.connect(DB_URI) as db:
         cur = db.cursor()
         cur.row_factory = ServiceCodes.servicecodes_factory
-        res: list[ServiceCodes] = cur.execute(select_all_sql).fetchall()
-    for x in res:
-        if not x.encrypted_backup_codes:
+        db_response: list[ServiceCodes] = cur.execute(select_all_sql).fetchall()
+    for row in db_response:
+        if not row.encrypted_backup_codes:
             raise ValueError(
                 "Something went wrong in retrieving encrypted data from database"
             )
-        x.decrypted_backup_codes = decrypt_item(x.encrypted_backup_codes, key)
-        console.print(x)
-        console.print("")
+        row.decrypted_backup_codes = key.decrypt_item(row.encrypted_backup_codes)
+        console.print(row, new_line_start=True)
 
 
 def options() -> argparse.Namespace:
