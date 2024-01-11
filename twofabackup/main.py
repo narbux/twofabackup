@@ -27,7 +27,7 @@ from rich.console import Console, ConsoleOptions, RenderResult
 from rich.panel import Panel
 from rich.prompt import Prompt
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 DB_URI = Path.home() / ".config/2FA_codes.db"
 
