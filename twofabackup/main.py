@@ -54,10 +54,10 @@ class ServiceCodes:
         )
         yield panel
 
-
-def servicecodes_factory(cursor, row):
-    fields = [column[0] for column in cursor.description]
-    return ServiceCodes(**{k: v for k, v in zip(fields, row)})
+    @classmethod
+    def servicecodes_factory(cls, cursor, row):
+        fields = [column[0] for column in cursor.description]
+        return cls(**{k: v for k, v in zip(fields, row)})
 
 
 def create_db() -> None:
@@ -152,7 +152,7 @@ def decrypt_all(args: argparse.Namespace) -> None:
     DB_URI.parent.mkdir(exist_ok=True)
     with sqlite3.connect(DB_URI) as db:
         cur = db.cursor()
-        cur.row_factory = servicecodes_factory
+        cur.row_factory = ServiceCodes.servicecodes_factory
         res: list[ServiceCodes] = cur.execute(select_all_sql).fetchall()
     for x in res:
         if not x.encrypted_backup_codes:
