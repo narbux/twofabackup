@@ -13,7 +13,8 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>."""
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
 
 import argparse
 import sqlite3
@@ -31,12 +32,14 @@ __version__ = "1.1.0"
 
 DB_URI = Path.home() / ".config/2FA_codes.db"
 
-console = Console(color_system="truecolor")
+printing_console = Console(color_system="truecolor")
 error_console = Console(stderr=True, style="bold red")
 
 
 @dataclass
 class ServiceCodes:
+    """Object that contains an entry from the database"""
+
     id: int
     service_name: str
     date_added: str
@@ -44,6 +47,7 @@ class ServiceCodes:
     encrypted_backup_codes: Optional[bytes] = None
     decrypted_backup_codes: Optional[str] = ""
 
+    # pylint: disable=unused-argument
     def __rich_console__(
         self, console: Console, options: ConsoleOptions
     ) -> RenderResult:
@@ -61,18 +65,40 @@ class ServiceCodes:
 
     @classmethod
     def servicecodes_factory(cls, cursor, row) -> Self:
+        """Helper method to map sql-selection from database to this ServiceCodes
+        class.
+
+        Args:
+            cursor (sqlite3.Cursor): Sqlite3 cursor object
+            row (sqlite3.Row): Sqlite3 Row object
+
+        Returns:
+            Self: Instance of ServiceCodes class
+        """
         fields = [column[0] for column in cursor.description]
-        return cls(**{k: v for k, v in zip(fields, row)})
+        return cls(**dict(zip(fields, row)))
 
 
 class KeyHolder:
+    """Object to instantiate a Fernet encryption engine."""
+
     def __init__(self):
         self.engine = self.fernet_factory()
 
     def fernet_factory(self) -> Fernet:
+        """Main method that creates a Fernet encryption engine using either a
+        generated key or key from user input.
+
+        Raises:
+            SystemExit: Fatal error when the key can't be used as a Fernet key
+
+        Returns:
+            Fernet: A fernet engine to encrypt and decrypt data
+        """
+
         if count_entries_db() == 0:
             key = self.generate_new_key()
-            console.print(
+            printing_console.print(
                 f"Your key is [blue bold] {key.decode()} [/] \nSave this code carefully!"
             )
         else:
@@ -80,33 +106,70 @@ class KeyHolder:
 
         try:
             fernet = Fernet(key)
-        except ValueError:
+        except ValueError as exc:
             error_console.print("Invalid key! #001")
-            raise SystemExit(1)
+            raise SystemExit(1) from exc
         return fernet
 
     @staticmethod
     def generate_new_key() -> bytes:
+        """Helper method to create a new random encryption key
+
+        Returns:
+            bytes: Generated input key
+        """
+
         return Fernet.generate_key()
 
     @staticmethod
     def ask_key_from_user() -> bytes:
+        """Helper method to get the encryption key from the user using a password
+        input prompt
+
+        Returns:
+            bytes: Input key from user
+        """
+
         key = Prompt.ask("Provide your encryption key", password=True)
         return key.encode()
 
     def encrypt_codes(self, clear_codes: str) -> bytes:
+        """Method to encrypt data using the objects' engine.
+
+        Args:
+            clear_codes (str): Unencrypted data
+
+        Returns:
+            bytes: Encrypted data
+        """
+
         return self.engine.encrypt(clear_codes.encode())
 
     def decrypt_item(self, data: bytes) -> str:
+        """Method to decrypt data retrieved from database using the objects' engine.
+
+        Args:
+            data (bytes): Encrypted data
+
+        Raises:
+            SystemExit: Fatal error when the key is not valid and data cannot be
+            decypted
+
+        Returns:
+            str: Decrypted data
+        """
+
         try:
             decrypted_data = self.engine.decrypt(data).decode()
-        except InvalidToken:
+        except InvalidToken as exc:
             error_console.print("Invalid key! #002")
-            raise SystemExit(1)
+            raise SystemExit(1) from exc
         return decrypted_data
 
 
 def create_db() -> None:
+    """Helper function to create database and `servicecodes` table."""
+
     create_tables_sql = """\
         CREATE TABLE IF NOT EXISTS servicecodes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -120,6 +183,12 @@ def create_db() -> None:
 
 
 def count_entries_db() -> int:
+    """Helper function to count rows in `servicecodes` table in database
+
+    Returns:
+        int: amount of rows in `servicecodes` table
+    """
+
     count_sql = """\
         SELECT COUNT() FROM servicecodes
     """
@@ -130,6 +199,13 @@ def count_entries_db() -> int:
 
 
 def input_in_db(args: argparse.Namespace) -> None:
+    """Main function that runs to input a new text file containing backup codes in
+    the database.
+
+    Args:
+        args (argparse.Namespace): command line options
+    """
+
     input_sql = """\
         INSERT INTO servicecodes (
             service_name, 
@@ -139,18 +215,28 @@ def input_in_db(args: argparse.Namespace) -> None:
         VALUES (?,?,?,?)
     """
     key = KeyHolder()
-    input = Path(args.file.name).read_text().strip()
-    encrypted_codes = key.encrypt_codes(input)
+    input_file_contents = Path(args.file.name).read_text(encoding="utf-8").strip()
+    encrypted_codes = key.encrypt_codes(input_file_contents)
     timestamp = datetime.now()
     with sqlite3.connect(DB_URI) as db:
         db.execute(
             input_sql,
             (args.name, args.description, encrypted_codes, timestamp),
         )
-    console.print(f"[green bold]\t>> Added {args.name} to database")
+    printing_console.print(f"[green bold]\t>> Added {args.name} to database")
 
 
-def decrypt_all(args: argparse.Namespace) -> None:
+def decrypt_all(args: argparse.Namespace) -> None:  # pylint: disable=unused-argument
+    """Main function that runs when the entire database is retrieved
+
+    Args:
+        args (argparse.Namespace): command line options
+
+    Raises:
+        SystemExit: Raised when database is empty and no entries can be retrieved
+        ValueError: Fatal error when somehow retrieved data cannot be decrypted
+    """
+
     if count_entries_db() < 1:
         error_console.print("Add new entries to db first.")
         error_console.print("See `twofabackup add -h` for details")
@@ -172,10 +258,17 @@ def decrypt_all(args: argparse.Namespace) -> None:
                 "Something went wrong in retrieving encrypted data from database"
             )
         row.decrypted_backup_codes = key.decrypt_item(row.encrypted_backup_codes)
-        console.print(row, new_line_start=True)
+        printing_console.print(row, new_line_start=True)
 
 
-def options() -> argparse.Namespace:
+def cli_options() -> argparse.Namespace:
+    """Function that parses command line arguments and decides which function to run
+
+    Returns:
+        argparse.Namespace: argparse namespace, see `help` descriptors for each
+        value
+    """
+
     parser = argparse.ArgumentParser(
         prog="twofabackup",
         description="Encrypted 2FA backup codes storage",
@@ -212,7 +305,12 @@ def options() -> argparse.Namespace:
 
 
 def main() -> None:
-    args = options()
+    """Main programm loop.
+    Retrieves command line arguments, creates databases and starts respective
+    function
+    """
+
+    args = cli_options()
     create_db()
     args.func(args)
 
