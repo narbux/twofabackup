@@ -24,6 +24,9 @@ cryptography = "^41.0.7"
 rich = "^13.7.0"
 
 
+[tool.poetry.group.dev.dependencies]
+pylint = "^3.0.3"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
