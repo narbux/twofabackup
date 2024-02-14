@@ -20,7 +20,7 @@ twofabackup = 'twofabackup.main:main'
 
 [tool.poetry.dependencies]
 python = "^3.11"
-cryptography = "^41.0.7"
+cryptography = ">=41.0.7,<43.0.0"
 rich = "^13.7.0"
 
 
